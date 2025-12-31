@@ -2,49 +2,51 @@ import faiss
 import pickle
 import numpy as np
 from functools import lru_cache
+from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 from app.config import OPENAI_API_KEY
 
-FAISS_INDEX_PATH = "app/data/faiss.index"
-FAISS_META_PATH = "app/data/faiss_meta.pkl"
 
+# ---------- OpenAI ----------
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ========= Load FAISS once =========
-@lru_cache
-def load_faiss():
-    index = faiss.read_index(FAISS_INDEX_PATH)
-    with open(FAISS_META_PATH, "rb") as f:
-        chunks = pickle.load(f)
-    texts = [c["text"] for c in chunks]
-    return index, texts
 
-# ========= Embedding =========
-def embed_query(text: str):
-    res = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=text
+# ---------- FAISS + Model (Lazy Loaded) ----------
+@lru_cache(maxsize=1)
+def get_resources():
+    model = SentenceTransformer(
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        device="cpu"
     )
-    return np.array(res.data[0].embedding, dtype="float32")
+    index = faiss.read_index("faiss.index")
+    meta = pickle.load(open("meta.pkl", "rb"))
+    return model, index, meta
 
-# ========= Search =========
-def search(query, k=10):
-    index, texts = load_faiss()
 
-    q_emb = embed_query(query).reshape(1, -1)
-    faiss.normalize_L2(q_emb)
+# ---------- OpenAI response parser ----------
+def extract_text(response) -> str:
+    text = ""
+    for item in response.output:
+        if item.type == "message":
+            for c in item.content:
+                if c.type == "output_text":
+                    text += c.text
+    return text.strip() if text.strip() else "لا أعلم."
 
-    D, I = index.search(q_emb, k)
 
-    return [
-        {"score": float(D[0][i]), "text": texts[idx]}
-        for i, idx in enumerate(I[0])
-    ]
+# ---------- RAG ----------
+def rag_llm_answer(query: str) -> str:
+    model, index, meta = get_resources()
+    texts = meta["texts"]
 
-# ========= RAG =========
-def rag_llm_answer(query: str):
-    results = search(query)
-    context = "\n\n".join(r["text"] for r in results)
+    q_emb = model.encode(
+        [query],
+        convert_to_numpy=True,
+        normalize_embeddings=True
+    ).astype("float32")
+
+    D, I = index.search(q_emb, 5)
+    context = "\n\n".join(texts[i] for i in I[0])
 
     prompt = f"""
 أجب فقط من النص التالي.
@@ -59,10 +61,9 @@ def rag_llm_answer(query: str):
 الإجابة:
 """
 
-    res = client.chat.completions.create(
+    response = client.responses.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
+        input=prompt
     )
 
-    return res.choices[0].message.content.strip()
+    return extract_text(response)
