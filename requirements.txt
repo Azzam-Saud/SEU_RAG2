@@ -1,7 +1,13 @@
-fastapi
-uvicorn
-faiss-cpu
-numpy
-openai
-python-docx
-pymupdf
+fastapi==0.127.0
+uvicorn==0.40.0
+gunicorn==21.2.0
+
+python-dotenv==1.2.1
+openai==2.9.0
+
+sentence-transformers==2.6.1
+torch==2.2.2+cpu
+numpy==1.26.4
+faiss-cpu==1.7.4
+
+--extra-index-url https://download.pytorch.org/whl/cpu
