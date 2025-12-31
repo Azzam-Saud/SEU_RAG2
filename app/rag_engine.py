@@ -2,37 +2,38 @@ import faiss
 import pickle
 import numpy as np
 from functools import lru_cache
-from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 from app.config import OPENAI_API_KEY
 
 FAISS_INDEX_PATH = "app/data/faiss.index"
 FAISS_META_PATH = "app/data/faiss_meta.pkl"
 
-@lru_cache
-def load_model():
-    return SentenceTransformer("intfloat/multilingual-e5-base")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
+# ========= Load FAISS once =========
 @lru_cache
 def load_faiss():
     index = faiss.read_index(FAISS_INDEX_PATH)
     with open(FAISS_META_PATH, "rb") as f:
-        meta = pickle.load(f)
-    return index, meta["texts"]
+        chunks = pickle.load(f)
+    texts = [c["text"] for c in chunks]
+    return index, texts
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+# ========= Embedding =========
+def embed_query(text: str):
+    res = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
+    )
+    return np.array(res.data[0].embedding, dtype="float32")
 
 # ========= Search =========
 def search(query, k=10):
-    model = load_model()
     index, texts = load_faiss()
 
-    q_emb = model.encode(
-        ["query: " + query],
-        convert_to_numpy=True
-    ).astype("float32")
-
+    q_emb = embed_query(query).reshape(1, -1)
     faiss.normalize_L2(q_emb)
+
     D, I = index.search(q_emb, k)
 
     return [
