@@ -1,11 +1,7 @@
 fastapi
 uvicorn
-
 faiss-cpu
 numpy
-
-sentence-transformers==2.6.1
-torch==2.2.2
-
+openai
 python-docx
 pymupdf
